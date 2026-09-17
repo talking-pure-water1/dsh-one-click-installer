@@ -82,8 +82,17 @@ foreach ($d in @($desktop, (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu
     if (-not (Test-Path -LiteralPath $d)) { continue }
     foreach ($f in (Get-ChildItem -LiteralPath $d -Filter *.lnk -ErrorAction SilentlyContinue)) {
         try {
-            $s = $sh.CreateShortcut($f.FullName)
-            if ((("$($s.Arguments)" -match 'start-dsh\.ps1') -or ("$($s.TargetPath)" -match '启动DSH\.vbs$')) -and -not ($toDelete -contains $f.FullName)) { [void]$toDelete.Add($f.FullName) }
+            $isOurs = $false
+            try {
+                $s = $sh.CreateShortcut($f.FullName)
+                $isOurs = (("$($s.Arguments)" -match 'start-dsh\.ps1') -or ("$($s.TargetPath)" -match '启动DSH\.vbs$'))
+            } catch { }
+            if (-not $isOurs) {
+                # COM 读不出来时（中文名 + 非中文代码页，COM 只返回空壳），直接扫文件内容
+                $txt = [System.Text.Encoding]::Unicode.GetString([System.IO.File]::ReadAllBytes($f.FullName))
+                $isOurs = ($txt.Contains('start-dsh.ps1') -or $txt.Contains('启动DSH.vbs'))
+            }
+            if ($isOurs -and -not ($toDelete -contains $f.FullName)) { [void]$toDelete.Add($f.FullName) }
         } catch { }
     }
 }

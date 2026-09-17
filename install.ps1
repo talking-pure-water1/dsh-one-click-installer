@@ -682,14 +682,19 @@ if ($SkipShortcut) {
         $smDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
         if (Test-Path -LiteralPath $smDir) {
             $smLnk = Join-Path $smDir 'DSH 控制面板.lnk'
+            # 与 shortcut.ps1 同理：COM 的 Save() 走系统 ANSI 代码页，非中文系统（如 cp1252）上
+            # 中文名会被压成 "??????" 而保存失败。先存 ASCII 临时名，再改名成真名。
+            $smTmp = Join-Path $smDir ("__dsh_panel_" + [guid]::NewGuid().ToString('N').Substring(0, 8) + ".lnk")
             $sh = New-Object -ComObject WScript.Shell
-            $s = $sh.CreateShortcut($smLnk)
+            $s = $sh.CreateShortcut($smTmp)
             $s.TargetPath = 'powershell.exe'
             $s.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $script:DeployDir 'panel.ps1')`""
             $s.WorkingDirectory = $script:DeployDir
             $s.Description = 'DSH 图形控制面板'
             $s.IconLocation = "$defaultIconPath,0"
             $s.Save()
+            if (Test-Path -LiteralPath $smLnk) { Remove-Item -LiteralPath $smLnk -Force }
+            Move-Item -LiteralPath $smTmp -Destination $smLnk -Force
             Write-Log "已在开始菜单添加入口：DSH 控制面板" 'note'
         }
     } catch { Write-Log "开始菜单入口创建失败（不影响使用）" 'note' }
