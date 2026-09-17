@@ -43,7 +43,22 @@ if ($problems.Count -eq 0) {
     $problems | ForEach-Object { Write-Host "       - $_" -ForegroundColor Red }
     # 失败时把子进程输出与运行环境一并打印出来 —— 否则原因会被吞掉，CI 上无从排查
     $sid = try { (Get-Process -Id $PID).SessionId } catch { '?' }
-    Write-Host "       [环境] 会话=$sid 交互式=$([Environment]::UserInteractive) 桌面存在=$(Test-Path -LiteralPath $desk) 用户=$env:USERNAME" -ForegroundColor DarkGray
+    $cp = [System.Text.Encoding]::Default.CodePage
+    Write-Host "       [环境] 会话=$sid 交互式=$([Environment]::UserInteractive) 代码页=$cp 桌面存在=$(Test-Path -LiteralPath $desk) 用户=$env:USERNAME" -ForegroundColor DarkGray
+    # 对照实验：换纯 ASCII 名字再建一次。
+    # 能建 => 是「中文名 + 系统 ANSI 代码页」的问题；也建不了 => 是整机/会话不支持 .lnk。
+    $asciiName = 'DSH-ASCII-probe'
+    $asciiLnk = Join-Path $desk "$asciiName.lnk"
+    if (Test-Path -LiteralPath $asciiLnk) { Remove-Item -LiteralPath $asciiLnk -Force }
+    $asciiOut = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $sc `
+        -LauncherRoot $Root -Name $asciiName -IconPath $icon -Force -NonInteractive 2>&1 | Out-String
+    $asciiCode = $LASTEXITCODE
+    $asciiExists = Test-Path -LiteralPath $asciiLnk
+    if ($asciiExists) { Remove-Item -LiteralPath $asciiLnk -Force }
+    Write-Host "       [对照] 纯 ASCII 名字：退出码=$asciiCode，快捷方式$(if ($asciiExists) { '生成成功' } else { '未生成' })" -ForegroundColor DarkGray
+    if ($asciiOut -and -not $asciiExists) {
+        $asciiOut.Trim() -split "`r?`n" | Select-Object -First 10 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+    }
     if ($out) {
         Write-Host "       [shortcut.ps1 输出]" -ForegroundColor DarkGray
         $out.Trim() -split "`r?`n" | Select-Object -First 30 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }

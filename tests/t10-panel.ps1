@@ -29,12 +29,14 @@ try {
         -WindowStyle Hidden -PassThru -RedirectStandardOutput $panelOut -RedirectStandardError $panelErr
 
     # 等待面板起来（快失败 + 最多约 45 秒；进程若已退出则立即结束等待）
+    # 单个请求超时给到 20 秒：CI 上首次 /api/status 要起 node/dsh 进程，2 秒根本不够，
+    # 会被误判成「面板没起来」。
     $base = "http://127.0.0.1:$port"
     $up = $false
     for ($i = 0; $i -lt 45; $i++) {
         Start-Sleep -Milliseconds 800
         try {
-            $r = Invoke-WebRequest -Uri "$base/api/status" -UseBasicParsing -TimeoutSec 2
+            $r = Invoke-WebRequest -Uri "$base/api/status" -UseBasicParsing -TimeoutSec 20
             if ($r.StatusCode -eq 200) { $up = $true; break }
         } catch { }
         if ($proc.HasExited) { break }
@@ -61,14 +63,14 @@ try {
     }
     if ($up) {
         # 1) 首页
-        $homeRes = Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 5
+        $homeRes = Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 15
         if ($homeRes.StatusCode -ne 200) { $problems += "首页状态码 $($homeRes.StatusCode)" }
         if ($homeRes.Content -notmatch '控制面板') { $problems += "首页缺少标题" }
         if ($homeRes.Content -notmatch '一键操作') { $problems += "首页缺少操作区" }
         if ($homeRes.Content -notmatch '安装 / 修复') { $problems += "首页缺少安装按钮" }
 
         # 2) 状态接口
-        $st = Invoke-RestMethod -Uri "$base/api/status" -TimeoutSec 5
+        $st = Invoke-RestMethod -Uri "$base/api/status" -TimeoutSec 15
         if (-not ($st.PSObject.Properties.Name -contains 'node')) { $problems += "状态缺少 node 字段" }
         if (-not ($st.PSObject.Properties.Name -contains 'dsh')) { $problems += "状态缺少 dsh 字段" }
         if (-not ($st.PSObject.Properties.Name -contains 'running')) { $problems += "状态缺少 running 字段" }
@@ -76,14 +78,14 @@ try {
         Write-Host "      面板状态：node=$($st.node) dsh=$($st.dsh) running=$($st.running) url=$($st.url)" -ForegroundColor DarkGray
 
         # 3) 日志接口
-        $log = Invoke-WebRequest -Uri "$base/api/log?name=launch" -UseBasicParsing -TimeoutSec 5
+        $log = Invoke-WebRequest -Uri "$base/api/log?name=launch" -UseBasicParsing -TimeoutSec 15
         if ($log.StatusCode -ne 200) { $problems += "日志接口状态码 $($log.StatusCode)" }
 
         # 4) 非法设置项必须被拒（400），且不能改动配置
         $cfgPath = Join-Path $Root 'launcher\config.json'
         $before = if (Test-Path -LiteralPath $cfgPath) { [System.IO.File]::ReadAllText($cfgPath) } else { '' }
         try {
-            Invoke-WebRequest -Uri "$base/api/setting" -Method POST -UseBasicParsing -TimeoutSec 5 `
+            Invoke-WebRequest -Uri "$base/api/setting" -Method POST -UseBasicParsing -TimeoutSec 15 `
                 -ContentType 'application/json' -Body '{"key":"evilKey"}' | Out-Null
             $problems += "非法设置项竟然被接受（应返回 400）"
         } catch {
@@ -94,7 +96,7 @@ try {
 
         # 5) 未知动作必须被拒（400）
         try {
-            Invoke-WebRequest -Uri "$base/api/action" -Method POST -UseBasicParsing -TimeoutSec 5 `
+            Invoke-WebRequest -Uri "$base/api/action" -Method POST -UseBasicParsing -TimeoutSec 15 `
                 -ContentType 'application/json' -Body '{"action":"rm -rf /"}' | Out-Null
             $problems += "未知动作竟然被接受（应返回 400）"
         } catch {

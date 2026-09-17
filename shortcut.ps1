@@ -156,9 +156,13 @@ if ((Test-Path -LiteralPath $lnkPath) -and -not $Force) {
 }
 
 # ── 创建快捷方式 ──
+# WScript.Shell 的 Save() 走系统 ANSI 代码页：在非中文系统（如 en-US / 代码页 1252）上，
+# 中文文件名会被压成 "??????"，Save() 直接报 Unable to save shortcut。
+# 所以先写到纯 ASCII 的临时名，再用文件重命名改成真名（重命名本身是 Unicode 的，不受代码页影响）。
+$tmpLnk = Join-Path $desktop ("__dsh_tmp_" + [guid]::NewGuid().ToString('N').Substring(0, 8) + ".lnk")
 try {
     $shell = New-Object -ComObject WScript.Shell
-    $lnk = $shell.CreateShortcut($lnkPath)
+    $lnk = $shell.CreateShortcut($tmpLnk)
     # 注意：CreateShortcut 会沿用已存在 .lnk 的旧属性，所以每个字段都要显式覆盖，
     # 否则旧快捷方式残留的 Arguments 会被继承下来（曾经踩过这个坑）。
     $lnk.TargetPath = $psExe
@@ -170,11 +174,24 @@ try {
     $lnk.Save()
 } catch {
     Write-Host "  [×] 创建快捷方式失败：$($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "      临时文件：$tmpLnk" -ForegroundColor DarkGray
     Write-Host "      目标文件：$lnkPath" -ForegroundColor DarkGray
     Write-Host "      目标目录：$desktop（存在=$(Test-Path -LiteralPath $desktop)）" -ForegroundColor DarkGray
-    Write-Host "      会话=$(try { (Get-Process -Id $PID).SessionId } catch { '?' }) 交互式=$([Environment]::UserInteractive)" -ForegroundColor DarkGray
+    Write-Host "      会话=$(try { (Get-Process -Id $PID).SessionId } catch { '?' }) 交互式=$([Environment]::UserInteractive) 代码页=$([System.Text.Encoding]::Default.CodePage)" -ForegroundColor DarkGray
     if ($_.ScriptStackTrace) { Write-Host "      调用栈：$($_.ScriptStackTrace)" -ForegroundColor DarkGray }
     exit 3
+}
+
+# 改回真正的名字（含中文等非 ANSI 字符也没问题）
+if ($tmpLnk -ne $lnkPath) {
+    try {
+        if (Test-Path -LiteralPath $lnkPath) { Remove-Item -LiteralPath $lnkPath -Force }
+        Move-Item -LiteralPath $tmpLnk -Destination $lnkPath -Force
+    } catch {
+        Write-Host "  [×] 快捷方式改名失败：$($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "      已生成的临时文件：$tmpLnk" -ForegroundColor Yellow
+        exit 3
+    }
 }
 
 # ── 回读校验 ──

@@ -79,6 +79,9 @@ function Get-NodeVersion {
 function Get-DshCmd {
     $cfg = Get-Config
     if ($cfg -and $cfg.dshCommand -and (Test-Path -LiteralPath $cfg.dshCommand)) { return "$($cfg.dshCommand)" }
+    # 先走 PATH（快）；只有找不到时才去问 npm ——「npm config get prefix」要拉起一个 npm 进程，很慢
+    $g = Get-Command dsh.cmd -ErrorAction SilentlyContinue
+    if ($g -and $g.Source) { return "$($g.Source)" }
     try {
         $prefix = (npm config get prefix) 2>$null
         if ($prefix -is [array]) { $prefix = $prefix[0] }
@@ -94,6 +97,21 @@ function Get-DshVersion {
     $c = Get-DshCmd
     if (-not $c) { return '' }
     try { $v = (& $c --version) 2>$null; if ($v -is [array]) { $v = $v[0] }; return "$v".Trim() } catch { return '' }
+}
+
+# ── 轻量缓存 ──
+# 查 node / dsh 版本都要起进程（尤其 npm config get prefix 慢），而面板页面每 4 秒轮询一次
+# /api/status。若每次都去起进程，接口会慢到客户端超时（CI 上就是这样把面板测试拖挂的）。
+# 用几十秒的短缓存兜住：既快，又不会让版本信息过时太久。
+$script:verCache = @{}
+function Get-CachedValue {
+    param([string]$Key, [int]$TtlSeconds, [scriptblock]$Factory)
+    $now = Get-Date
+    $hit = $script:verCache[$Key]
+    if ($hit -and ($now - $hit.Time).TotalSeconds -lt $TtlSeconds) { return $hit.Value }
+    $v = & $Factory
+    $script:verCache[$Key] = @{ Time = $now; Value = $v }
+    return $v
 }
 
 function Get-ServiceState {
@@ -383,8 +401,8 @@ while ($running -and $listener.IsListening) {
             $dataRoot = ''
             if ($cfg -and $cfg.installRoot) { $dataRoot = "$($cfg.installRoot)" }
             Send-Json -Response $res -Object ([ordered]@{
-                node                   = (Get-NodeVersion)
-                dsh                    = (Get-DshVersion)
+                node                   = (Get-CachedValue -Key 'node' -TtlSeconds 30 -Factory { Get-NodeVersion })
+                dsh                    = (Get-CachedValue -Key 'dsh' -TtlSeconds 30 -Factory { Get-DshVersion })
                 running                = $svc.Running
                 port                   = $svc.Port
                 url                    = $svc.Url

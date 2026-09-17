@@ -37,10 +37,14 @@ foreach ($t in $tests) {
     $code = $LASTEXITCODE
     $sw.Stop()
 
+    # 判定以退出码为准：只有成功退出时才可能算「跳过」。
+    # 曾经只要输出里出现 SKIP 就把失败的项也算成跳过（诊断信息里带出 -SkipNode 之类字样就会误判）。
     $verdict = 'FAIL'
-    if ($code -eq 0) { $verdict = 'PASS' }
-    if ($out -match 'SKIP') { $verdict = 'SKIP' }
-    $firstLine = ($out -split "`r?`n" | Where-Object { $_ -match 'PASS|FAIL|SKIP' } | Select-Object -First 1)
+    if ($code -eq 0) {
+        $verdict = if ($out -match '(?m)^\s*SKIP') { 'SKIP' } else { 'PASS' }
+    }
+    # 摘要只认「行首就是判定词」的那一行，避免诊断信息里的字样被当成判定
+    $firstLine = ($out -split "`r?`n" | Where-Object { $_ -match '^\s*(PASS|FAIL|SKIP)[ 　]' } | Select-Object -First 1)
     if (-not $firstLine) { $firstLine = ($out -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -First 1) }
 
     $color = switch ($verdict) { 'PASS' { 'Green' } 'SKIP' { 'Yellow' } default { 'Red' } }
