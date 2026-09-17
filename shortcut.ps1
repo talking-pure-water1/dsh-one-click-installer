@@ -98,6 +98,10 @@ $psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$start
 
 $defaultIcon = Join-Path $LauncherRoot 'assets\dsh.ico'
 $desktop = Get-RealDesktop -Override $DesktopPath
+if ([string]::IsNullOrWhiteSpace($desktop)) {
+    $desktop = Join-Path $env:USERPROFILE 'Desktop'
+}
+Write-Host "  [i] 桌面目录：$desktop（存在=$(Test-Path -LiteralPath $desktop)）" -ForegroundColor DarkGray
 
 # ── 交互式询问名称与图标 ──
 $interactiveMode = $Interactive -or (-not $NonInteractive)
@@ -166,6 +170,10 @@ try {
     $lnk.Save()
 } catch {
     Write-Host "  [×] 创建快捷方式失败：$($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "      目标文件：$lnkPath" -ForegroundColor DarkGray
+    Write-Host "      目标目录：$desktop（存在=$(Test-Path -LiteralPath $desktop)）" -ForegroundColor DarkGray
+    Write-Host "      会话=$(try { (Get-Process -Id $PID).SessionId } catch { '?' }) 交互式=$([Environment]::UserInteractive)" -ForegroundColor DarkGray
+    if ($_.ScriptStackTrace) { Write-Host "      调用栈：$($_.ScriptStackTrace)" -ForegroundColor DarkGray }
     exit 3
 }
 

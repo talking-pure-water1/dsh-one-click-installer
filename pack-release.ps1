@@ -87,6 +87,21 @@ function New-Package {
         foreach ($d in $devDirs)  { $count += Copy-One -Rel $d -StageFolder $stageFolder }
     }
 
+    # 用户说明书兜底：仓库版把说明放在 docs\ 下（文件名与工具包不同），
+    # 包里统一成同一个文件名，免得打出来的包少了说明书。
+    $guide = Join-Path $stageFolder 'README_给小白的使用说明.md'
+    if (-not (Test-Path -LiteralPath $guide)) {
+        foreach ($cand in @('docs\使用说明.md', 'README.md')) {
+            $p = Join-Path $src $cand
+            if (Test-Path -LiteralPath $p) {
+                Copy-Item -LiteralPath $p -Destination $guide -Force
+                $count++
+                Write-Host "    说明书取自：$cand" -ForegroundColor DarkGray
+                break
+            }
+        }
+    }
+
     # 兜底清理：万一目录里混进了运行产物
     foreach ($pat in $excludeDirPatterns) {
         Get-ChildItem -LiteralPath $stageFolder -Recurse -Directory -ErrorAction SilentlyContinue |

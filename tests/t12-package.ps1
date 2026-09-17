@@ -75,7 +75,7 @@ try {
             $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer,
                    '-InstallRoot', $sandbox, '-SkipNode', '-SkipDsh', '-SkipDshHome', '-NoStart',
                    '-NonInteractive', '-NoEnvChange', '-ShortcutName', $scName)
-            $null = & powershell.exe @a 2>&1 | Out-String
+            $instOut = & powershell.exe @a 2>&1 | Out-String
             if (-not (Test-Path -LiteralPath (Join-Path $sandbox 'app\launcher\start-dsh.ps1'))) {
                 $problems += "用精简版安装后，部署目录里没有启动器"
             }
@@ -96,5 +96,15 @@ if ($problems.Count -eq 0) {
 } else {
     Write-Host "FAIL 打包质量：" -ForegroundColor Red
     $problems | ForEach-Object { Write-Host "       - $_" -ForegroundColor Red }
+    $sid = try { (Get-Process -Id $PID).SessionId } catch { '?' }
+    Write-Host "       [环境] 会话=$sid 交互式=$([Environment]::UserInteractive) 桌面=$desktop 存在=$(Test-Path -LiteralPath $desktop)" -ForegroundColor DarkGray
+    if ($instOut) {
+        Write-Host "       [精简版安装输出]" -ForegroundColor DarkGray
+        $instOut.Trim() -split "`r?`n" | Select-Object -First 40 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+    }
+    if ($out) {
+        Write-Host "       [打包脚本输出]" -ForegroundColor DarkGray
+        $out.Trim() -split "`r?`n" | Select-Object -First 15 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+    }
     exit 1
 }

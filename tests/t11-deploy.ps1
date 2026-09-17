@@ -82,5 +82,11 @@ if ($problems.Count -eq 0) {
 } else {
     Write-Host "FAIL 自部署：" -ForegroundColor Red
     $problems | ForEach-Object { Write-Host "       - $_" -ForegroundColor Red }
+    $sid = try { (Get-Process -Id $PID).SessionId } catch { '?' }
+    Write-Host "       [环境] 会话=$sid 交互式=$([Environment]::UserInteractive) 桌面=$desktop 存在=$(Test-Path -LiteralPath $desktop)" -ForegroundColor DarkGray
+    if ($out) {
+        Write-Host "       [install.ps1 输出]" -ForegroundColor DarkGray
+        $out.Trim() -split "`r?`n" | Select-Object -First 40 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+    }
     exit 1
 }

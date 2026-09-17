@@ -3,6 +3,11 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $ps = Join-Path $Root 'panel.ps1'
 
+# 关掉「自动发现代理」（WPAD）：CI 机器上 Invoke-WebRequest 会去探测 wpad 主机，
+# 每次都要等 DNS 超时，表现为「面板明明在监听、本机却连不上」，且一跑就是两分钟。
+try { [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy } catch { }
+[System.Net.ServicePointManager]::Expect100Continue = $false
+
 # 找一个空闲端口
 $port = 0
 for ($p = 17850; $p -lt 17900; $p++) {
@@ -43,15 +48,15 @@ try {
                 if ($t) { $diag += $t }
             }
         }
-        if ($diag -match 'Access is denied|拒绝访问|HttpListener|权限|not permitted') {
+        if ($diag -match 'Access is denied|拒绝访问|HttpListener|权限|not permitted|已被占用|already in use') {
             # 环境不允许绑定本地监听地址（常见于 CI/受策略限制的机器）——这是环境限制，不是代码缺陷
             $envSkipped = $true
             Write-Host "SKIP 图形面板：本机环境不允许绑定本地监听端口（需管理员/URL ACL），非代码缺陷" -ForegroundColor Yellow
             Write-Host "     面板报错：$($diag.Trim().Split([Environment]::NewLine)[0])" -ForegroundColor DarkGray
         } else {
-            $problems += "面板未能在约 36 秒内启动（端口 $port）"
-            if ($diag) { $problems += "面板输出：$($diag.Trim())" }
-            if ($proc.HasExited) { $problems += "面板进程已退出，退出码 $($proc.ExitCode)" }
+            $problems += "面板未能在约 36 秒内启动（端口 $port，已试 $i 次）"
+            if ($diag) { $problems += "面板输出：$($diag.Trim())" } else { $problems += "面板既没有输出也没有报错（疑似请求被代理/防火墙吞掉）" }
+            if ($proc.HasExited) { $problems += "面板进程已退出，退出码 $($proc.ExitCode)" } else { $problems += "面板进程仍在运行（说明端口已监听，问题出在 HTTP 请求侧）" }
         }
     }
     if ($up) {

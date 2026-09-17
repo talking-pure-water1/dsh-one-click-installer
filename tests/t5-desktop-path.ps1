@@ -17,6 +17,7 @@ $code = $LASTEXITCODE
 $problems = @()
 if ($code -ne 0) { $problems += "退出码 $code（应为 0）" }
 if (-not (Test-Path -LiteralPath $lnk)) { $problems += "快捷方式未出现在真实桌面：$lnk" }
+if (-not (Test-Path -LiteralPath $desk)) { $problems += "真实桌面目录本身不存在：$desk" }
 
 if (Test-Path -LiteralPath $lnk) {
     $sh = New-Object -ComObject WScript.Shell
@@ -40,5 +41,14 @@ if ($problems.Count -eq 0) {
 } else {
     Write-Host "FAIL 快捷方式：" -ForegroundColor Red
     $problems | ForEach-Object { Write-Host "       - $_" -ForegroundColor Red }
+    # 失败时把子进程输出与运行环境一并打印出来 —— 否则原因会被吞掉，CI 上无从排查
+    $sid = try { (Get-Process -Id $PID).SessionId } catch { '?' }
+    Write-Host "       [环境] 会话=$sid 交互式=$([Environment]::UserInteractive) 桌面存在=$(Test-Path -LiteralPath $desk) 用户=$env:USERNAME" -ForegroundColor DarkGray
+    if ($out) {
+        Write-Host "       [shortcut.ps1 输出]" -ForegroundColor DarkGray
+        $out.Trim() -split "`r?`n" | Select-Object -First 30 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+    } else {
+        Write-Host "       [shortcut.ps1 没有任何输出]" -ForegroundColor DarkGray
+    }
     exit 1
 }
