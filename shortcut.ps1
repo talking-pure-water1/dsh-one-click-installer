@@ -122,6 +122,16 @@ if ($iconFinal -eq $defaultIcon -and -not (Test-Path -LiteralPath $defaultIcon))
 
 $lnkPath = Join-Path $desktop "$Name.lnk"
 
+# 桌面目录不一定存在（全新用户、无人值守会话、CI 机器都可能没有），先补出来再写快捷方式
+if (-not $DryRun -and -not (Test-Path -LiteralPath $desktop)) {
+    try { New-Item -ItemType Directory -Path $desktop -Force | Out-Null } catch { }
+    if (Test-Path -LiteralPath $desktop) { Write-Host "  [i] 桌面目录原本不存在，已创建：$desktop" -ForegroundColor DarkGray }
+    else {
+        Write-Host "  [×] 桌面目录无法创建：$desktop" -ForegroundColor Red
+        exit 3
+    }
+}
+
 Write-Host ""
 Write-Host "  名称：$Name"
 Write-Host "  位置：$lnkPath"

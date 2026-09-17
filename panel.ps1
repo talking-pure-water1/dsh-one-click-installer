@@ -341,8 +341,12 @@ $listener.Prefixes.Add($prefix)
 try {
     $listener.Start()
 } catch {
-    Write-Host "  [×] 面板启动失败：$($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "      可能端口被占用或需要管理员权限，换一个端口再试：-Port 17801" -ForegroundColor Yellow
+    $msg = "面板启动失败：$($_.Exception.Message)"
+    Write-PanelLog $msg
+    Write-Host "  [×] $msg"
+    Write-Host "      可能端口被占用，或系统不允许注册本地监听地址（需要管理员/URL ACL），换一个端口再试：-Port 17801" -ForegroundColor Yellow
+    # 便于自动化诊断：把失败原因写到 stderr
+    [Console]::Error.WriteLine($msg)
     exit 1
 }
 

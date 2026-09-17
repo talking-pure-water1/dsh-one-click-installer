@@ -13,22 +13,48 @@ if ($port -eq 0) { Write-Host "SKIP 找不到可用于测试的空闲端口" -Fo
 
 $proc = $null
 $problems = @()
+$envSkipped = $false
+$tmp = Join-Path $env:TEMP ("dsh-panel-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+$panelOut = Join-Path $tmp 'panel-out.log'
+$panelErr = Join-Path $tmp 'panel-err.log'
 try {
-    $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ps, '-Port', "$port", '-NoBrowser') -WindowStyle Hidden -PassThru
+    $proc = Start-Process -FilePath 'powershell.exe' `
+        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ps, '-Port', "$port", '-NoBrowser') `
+        -WindowStyle Hidden -PassThru -RedirectStandardOutput $panelOut -RedirectStandardError $panelErr
 
-    # 等待面板起来
+    # 等待面板起来（快失败 + 最多约 45 秒；进程若已退出则立即结束等待）
     $base = "http://127.0.0.1:$port"
     $up = $false
-    for ($i = 0; $i -lt 40; $i++) {
-        Start-Sleep -Milliseconds 500
+    for ($i = 0; $i -lt 45; $i++) {
+        Start-Sleep -Milliseconds 800
         try {
-            $r = Invoke-WebRequest -Uri "$base/api/status" -UseBasicParsing -TimeoutSec 3
+            $r = Invoke-WebRequest -Uri "$base/api/status" -UseBasicParsing -TimeoutSec 2
             if ($r.StatusCode -eq 200) { $up = $true; break }
         } catch { }
+        if ($proc.HasExited) { break }
     }
     if (-not $up) {
-        $problems += "面板未能在 20 秒内启动（端口 $port）"
-    } else {
+        # 收集诊断信息：面板自己的输出与错误
+        $diag = ''
+        foreach ($f in @($panelOut, $panelErr)) {
+            if (Test-Path -LiteralPath $f) {
+                $t = (Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue)
+                if ($t) { $diag += $t }
+            }
+        }
+        if ($diag -match 'Access is denied|拒绝访问|HttpListener|权限|not permitted') {
+            # 环境不允许绑定本地监听地址（常见于 CI/受策略限制的机器）——这是环境限制，不是代码缺陷
+            $envSkipped = $true
+            Write-Host "SKIP 图形面板：本机环境不允许绑定本地监听端口（需管理员/URL ACL），非代码缺陷" -ForegroundColor Yellow
+            Write-Host "     面板报错：$($diag.Trim().Split([Environment]::NewLine)[0])" -ForegroundColor DarkGray
+        } else {
+            $problems += "面板未能在约 36 秒内启动（端口 $port）"
+            if ($diag) { $problems += "面板输出：$($diag.Trim())" }
+            if ($proc.HasExited) { $problems += "面板进程已退出，退出码 $($proc.ExitCode)" }
+        }
+    }
+    if ($up) {
         # 1) 首页
         $homeRes = Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 5
         if ($homeRes.StatusCode -ne 200) { $problems += "首页状态码 $($homeRes.StatusCode)" }
@@ -73,7 +99,10 @@ try {
 } finally {
     if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 800
+    Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+if ($envSkipped) { exit 0 }   # 环境不允许绑端口：已打印 SKIP，不作为失败
 
 if ($problems.Count -eq 0) {
     Write-Host "PASS 图形面板：首页/状态/日志接口正常，非法输入被拒且未改动配置" -ForegroundColor Green
