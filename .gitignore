@@ -1,0 +1,19 @@
+# 本机运行产物（安装/启动后生成，不要提交）
+install.log
+launcher/config.json
+launcher/*.log
+launcher/serving-url.txt
+launcher/app-profile/
+tests/测试报告.md
+
+# 测试与打包产生的临时目录 / 产物
+_verify_*/
+*.zip
+*.log
+
+# Windows / 编辑器
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp

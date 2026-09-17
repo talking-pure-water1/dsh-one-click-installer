@@ -1,0 +1,11 @@
+# 统一换行符，避免不同机器上出现无意义的整文件差异
+* text=auto
+
+# Windows 脚本统一用 CRLF（cmd.exe / PowerShell 都更稳）
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制资源
+*.ico binary
+*.png binary
+*.jpg binary
