@@ -1,5 +1,6 @@
 ﻿# 验收 5：快捷方式落点与属性 —— 必须在「真实桌面」（兼容 360/OneDrive 迁移）并可回读
 $Root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'lnk-verify.ps1')
 $sc = Join-Path $Root 'shortcut.ps1'
 $icon = Join-Path $Root 'assets\dsh.ico'
 $name = 'DSH测试快捷方式_t5'
@@ -20,14 +21,29 @@ if (-not (Test-Path -LiteralPath $lnk)) { $problems += "快捷方式未出现在
 if (-not (Test-Path -LiteralPath $desk)) { $problems += "真实桌面目录本身不存在：$desk" }
 
 if (Test-Path -LiteralPath $lnk) {
-    $sh = New-Object -ComObject WScript.Shell
-    $v = $sh.CreateShortcut($lnk)
-    # 现在快捷方式直接调用 powershell 隐藏运行 start-dsh.ps1（不再经过 wscript + .vbs）
-    if ("$($v.TargetPath)" -notmatch 'powershell') { $problems += "目标不是 powershell：$($v.TargetPath)" }
-    if ("$($v.Arguments)" -notmatch 'start-dsh\.ps1') { $problems += "参数里没有启动脚本：$($v.Arguments)" }
-    if ("$($v.Arguments)" -match '\.vbs') { $problems += "参数里仍有 .vbs（旧实现残留）：$($v.Arguments)" }
-    if ($v.IconLocation -notmatch 'dsh\.ico') { $problems += "图标未生效：$($v.IconLocation)" }
-    if ($v.WorkingDirectory -ne $Root) { $problems += "工作目录不符：$($v.WorkingDirectory)" }
+    # 主校验：直接解析 .lnk 内容（与系统代码页无关，中文名也照样能验）
+    $raw = Get-LnkRawText -Path $lnk
+    if (-not (Test-LnkContains $raw 'powershell.exe')) { $problems += "目标不是 powershell（.lnk 内容里找不到 powershell.exe）" }
+    if (-not (Test-LnkContains $raw 'start-dsh.ps1')) { $problems += "参数里没有启动脚本（.lnk 内容里找不到 start-dsh.ps1）" }
+    if (Test-LnkContains $raw '.vbs') { $problems += "参数里仍有 .vbs（旧实现残留）" }
+    if (-not (Test-LnkContains $raw 'dsh.ico')) { $problems += "图标未生效（.lnk 内容里找不到 dsh.ico）" }
+    if (-not (Test-LnkContains $raw $Root)) { $problems += "参数里没有安装目录（.lnk 内容里找不到 $Root）" }
+    if ($raw.Size -lt 500) { $problems += "快捷方式文件过小（$($raw.Size) 字节，疑似空壳）" }
+
+    # 附加校验：系统 ANSI 代码页能表示这个路径时，再用 WScript.Shell 回读一遍
+    # （最接近用户实际看到的东西；中文系统上是能跑的，不会白白丢掉这层覆盖）
+    $ansiEnc = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
+    $comReadable = ($ansiEnc.GetString($ansiEnc.GetBytes($lnk)) -eq $lnk)
+    if ($comReadable) {
+        $sh = New-Object -ComObject WScript.Shell
+        $v = $sh.CreateShortcut($lnk)
+        if ("$($v.TargetPath)" -notmatch 'powershell') { $problems += "COM 回读目标不是 powershell：$($v.TargetPath)" }
+        if ("$($v.Arguments)" -notmatch 'start-dsh\.ps1') { $problems += "COM 回读参数里没有启动脚本" }
+        if ($v.IconLocation -notmatch 'dsh\.ico') { $problems += "COM 回读图标未生效：$($v.IconLocation)" }
+        if ($v.WorkingDirectory -ne $Root) { $problems += "COM 回读工作目录不符：$($v.WorkingDirectory)" }
+    } else {
+        Write-Host "       （本机代码页表示不了这个路径，跳过 WScript.Shell 回读：COM 根本打不开这种名字）" -ForegroundColor DarkGray
+    }
     Remove-Item -LiteralPath $lnk -Force   # 清理测试产物
 }
 
@@ -36,7 +52,7 @@ if ($desk -ne $naive) {
 }
 
 if ($problems.Count -eq 0) {
-    Write-Host "PASS 快捷方式：落点正确、目标/图标/工作目录回读一致" -ForegroundColor Green
+    Write-Host "PASS 快捷方式：落点正确，目标/参数/图标/安装目录校验一致" -ForegroundColor Green
     exit 0
 } else {
     Write-Host "FAIL 快捷方式：" -ForegroundColor Red

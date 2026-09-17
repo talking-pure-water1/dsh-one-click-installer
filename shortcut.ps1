@@ -195,17 +195,38 @@ if ($tmpLnk -ne $lnkPath) {
 }
 
 # ── 回读校验 ──
-try {
-    $verify = $shell.CreateShortcut($lnkPath)
-    $okTarget = ("$($verify.TargetPath)" -like '*powershell*') -and ("$($verify.Arguments)" -match 'start-dsh\.ps1')
-    Write-Host "  [√] 已创建：$lnkPath" -ForegroundColor Green
-    Write-Host "      目标回读：$($verify.TargetPath)" -ForegroundColor DarkGray
-    Write-Host "      参数回读：$($verify.Arguments)" -ForegroundColor DarkGray
-    Write-Host "      工作目录：$($verify.WorkingDirectory)" -ForegroundColor DarkGray
-    Write-Host "      图标回读：$($verify.IconLocation)" -ForegroundColor DarkGray
-    if (-not $okTarget) { Write-Host "  [!] 目标回读不一致，请手动检查" -ForegroundColor Yellow }
-} catch {
-    Write-Host "  [!] 回读校验失败（文件可能已创建成功）：$($_.Exception.Message)" -ForegroundColor Yellow
+# 注意：WScript.Shell 的「读」也走 ANSI 代码页。在非中文系统（如 en-US / 代码页 1252）上，
+# CreateShortcut 打不开含中文的路径，而且**不报错**、只返回一个各属性全空的空壳对象。
+# 所以这种路径改成直接读 .lnk 文件内容校验（里面的字符串是 UTF-16LE，与代码页无关）。
+$ansiEnc = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
+$comReadable = ($ansiEnc.GetString($ansiEnc.GetBytes($lnkPath)) -eq $lnkPath)
+if (-not $comReadable) {
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($lnkPath)
+        $txt = [System.Text.Encoding]::Unicode.GetString($bytes)
+        $okTarget = ($txt.Contains('powershell') -and $txt.Contains('start-dsh.ps1') -and $bytes.Length -gt 500)
+        Write-Host "  [√] 已创建：$lnkPath（$([math]::Round($bytes.Length/1KB,1)) KB）" -ForegroundColor Green
+        if ($okTarget) {
+            Write-Host "      该名字含中文，已改用文件内容校验：目标与启动参数均已写入" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  [!] 文件内容看起来不完整，请手动检查" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "  [!] 回读校验失败（文件可能已创建成功）：$($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    try {
+        $verify = $shell.CreateShortcut($lnkPath)
+        $okTarget = ("$($verify.TargetPath)" -like '*powershell*') -and ("$($verify.Arguments)" -match 'start-dsh\.ps1')
+        Write-Host "  [√] 已创建：$lnkPath" -ForegroundColor Green
+        Write-Host "      目标回读：$($verify.TargetPath)" -ForegroundColor DarkGray
+        Write-Host "      参数回读：$($verify.Arguments)" -ForegroundColor DarkGray
+        Write-Host "      工作目录：$($verify.WorkingDirectory)" -ForegroundColor DarkGray
+        Write-Host "      图标回读：$($verify.IconLocation)" -ForegroundColor DarkGray
+        if (-not $okTarget) { Write-Host "  [!] 目标回读不一致，请手动检查" -ForegroundColor Yellow }
+    } catch {
+        Write-Host "  [!] 回读校验失败（文件可能已创建成功）：$($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 # ── 清理重复：桌面/开始菜单里指向同一个启动器的其它快捷方式 ──
@@ -217,10 +238,18 @@ if ($RemoveDuplicates) {
         foreach ($f in (Get-ChildItem -LiteralPath $d -Filter *.lnk -ErrorAction SilentlyContinue)) {
             if ($f.FullName -eq $lnkPath) { continue }
             try {
-                $s = $shell.CreateShortcut($f.FullName)
-                $isOurs = ("$($s.Arguments)" -match 'start-dsh\.ps1') -or
-                          ("$($s.TargetPath)" -match '启动DSH\.vbs$') -or
-                          ("$($s.Arguments)" -match '启动DSH\.vbs')
+                $isOurs = $false
+                try {
+                    $s = $shell.CreateShortcut($f.FullName)
+                    $isOurs = ("$($s.Arguments)" -match 'start-dsh\.ps1') -or
+                              ("$($s.TargetPath)" -match '启动DSH\.vbs$') -or
+                              ("$($s.Arguments)" -match '启动DSH\.vbs')
+                } catch { }
+                if (-not $isOurs) {
+                    # COM 读不出来时（例如中文名 + 非中文代码页），退化成直接扫文件内容
+                    $txt = [System.Text.Encoding]::Unicode.GetString([System.IO.File]::ReadAllBytes($f.FullName))
+                    $isOurs = ($txt.Contains('start-dsh.ps1') -or $txt.Contains('启动DSH.vbs'))
+                }
                 if ($isOurs) {
                     Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
                     Write-Host "  [√] 清理重复快捷方式：$($f.Name)" -ForegroundColor DarkYellow

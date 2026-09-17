@@ -1,6 +1,7 @@
 ﻿# 验收 11：自部署 —— 程序复制到安装目录，快捷方式指向安装目录（所以工具包可以删掉）
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'lnk-verify.ps1')
 $installer = Join-Path $Root 'install.ps1'
 $sandbox = Join-Path $Root '_verify_deploy'
 $desktop = [Environment]::GetFolderPath('Desktop')
@@ -9,15 +10,8 @@ $lnk = Join-Path $desktop "$scName.lnk"
 $startPs = Join-Path $sandbox 'app\launcher\start-dsh.ps1'
 
 function Get-MatchingShortcuts {
-    $sh = New-Object -ComObject WScript.Shell
-    $out = @()
-    foreach ($d in @($desktop, (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))) {
-        if (-not (Test-Path -LiteralPath $d)) { continue }
-        foreach ($f in (Get-ChildItem -LiteralPath $d -Filter *.lnk -ErrorAction SilentlyContinue)) {
-            try { if ("$($sh.CreateShortcut($f.FullName).Arguments)" -match 'start-dsh\.ps1') { $out += $f.FullName } } catch { }
-        }
-    }
-    return $out
+    # 不用 WScript.Shell 读（中文名在非中文系统上打不开），改扫 .lnk 内容
+    return @(Get-DshShortcuts -Desktop $desktop)
 }
 
 # 清理可能的残留
@@ -52,16 +46,16 @@ try {
     if (-not (Test-Path -LiteralPath $lnk)) {
         $problems += "没有创建快捷方式：$lnk"
     } else {
-        $sh = New-Object -ComObject WScript.Shell
-        $s = $sh.CreateShortcut($lnk)
-        if ("$($s.TargetPath)" -notmatch 'powershell') { $problems += "快捷方式目标不是 powershell：$($s.TargetPath)" }
-        if ("$($s.Arguments)" -notmatch 'start-dsh\.ps1') { $problems += "快捷方式参数里没有启动脚本：$($s.Arguments)" }
+        # 校验 .lnk 内容（与系统代码页无关）
+        $raw = Get-LnkRawText -Path $lnk
+        if (-not (Test-LnkContains $raw 'powershell.exe')) { $problems += "快捷方式目标不是 powershell" }
+        if (-not (Test-LnkContains $raw 'start-dsh.ps1')) { $problems += "快捷方式参数里没有启动脚本" }
         # 关键判据：参数必须指向「部署目录里的启动脚本」，而不是下载来的工具包里的那份
         $expectedScript = Join-Path $sandbox 'app\launcher\start-dsh.ps1'
-        if ("$($s.Arguments)" -notmatch [regex]::Escape($expectedScript)) { $problems += "快捷方式参数没有指向部署目录：$($s.Arguments)" }
+        if (-not (Test-LnkContains $raw $expectedScript)) { $problems += "快捷方式参数没有指向部署目录：$expectedScript" }
         $sourceScript = Join-Path $Root 'launcher\start-dsh.ps1'
-        if ("$($s.Arguments)" -match [regex]::Escape($sourceScript)) { $problems += "快捷方式仍指向工具包内部（删掉工具包就废了）" }
-        Write-Host "      快捷方式目标：$($s.TargetPath)" -ForegroundColor DarkGray
+        if (Test-LnkContains $raw $sourceScript) { $problems += "快捷方式仍指向工具包内部（删掉工具包就废了）" }
+        Write-Host "      快捷方式已创建并校验通过：$lnk" -ForegroundColor DarkGray
     }
 
     # 4) 再装一次不应产生第二个快捷方式（去重）
